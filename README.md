@@ -1,2 +1,2 @@
 # AVR Controlled AirQualityMonitor
-A home air quality monitoring system
+An AVR controlled air quality monitoring system
