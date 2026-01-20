@@ -1,7 +1,7 @@
 /*
  * DHT22.c
  *
- * Created: 1/12/2026 11:55:40 AM
+ * Created: 1/20/2026 11:55:40 AM
  * Author : Alex Mertz
  * This program operates the DHT22 temperature and humidity sensor using an AVR Atmega328P MCU 
  */ 
@@ -11,17 +11,56 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+//Pin Mapping 
+/*
+Port B:
+PB0:
+PB1:
+PB2:
+PB3:
+PB7:
+
+PORT D:
+PD0: Status LED
+PD1: 
+PD2:
+PD3:
+PD4:
+PD5:
+PD6:
+PD7: DHT22 IC
+*/
+
+//DHT22 port/pin definitions (PORT D, Pin 7) 
+#define DHT22DDR DDRD
+#define DHT22In PIND
+#define DHT22Port PORTD
+#define DHT22Pin 7
+
+//LCD port/pins definitions
+
+//MISC port/Pins definitions (PORT B, Pin 0)
+#define StatusLEDDDR DDRB
+#define StatusLEDIn PINB
+#define StatusLEDPort PORTB
+#define StatusLEDPin 0
+
+//DHT22 Functions
 bool DHT22Initialize (void);
 bool readDHT22 (uint8_t *data);
 void displayDHT22 (uint8_t *data);
 void verifyDHT22 (uint8_t *data);
 
+//LCD Functions
+void LCDInitialize (void);
+void LCDControl (uint8_t command);
+void LCDWrite (uint8_t output); 
 int main(void)
 {
 bool readSuccess;	
 uint8_t DHT22Data[5];
-// Data Direction Register B: turns bit 0 (PB0) into output mode
-DDRB |= 0b00000001; 
+// Data Direction Register B: turns bit 0 (PB0) into output mode for the status LED
+StatusLEDDDR |= 0b00000001; 
 
 //runs the initialization routine until the DHT22 sensor is appropriately initiated  
 while (!DHT22Initialize()); 
@@ -32,7 +71,7 @@ _delay_us(80);
     {
 		do
 		{
-		readSuccess = readDHT22(DHT22Data)
+		readSuccess = readDHT22(DHT22Data);
 		}while (!readSuccess);
 			;
 		displayDHT22(DHT22Data);
@@ -43,24 +82,24 @@ bool DHT22Initialize(void){
 //Initializes DHT22 sensor into output mode
 // Data Direction Register D: turns bit 7 (PD7) into output mode and pulls PD7 to a low level
 // for 1.5ms in order initialize the DHT22
-DDRD |= (1 << 7);
+DHT22DDR |= (1 << DHT22Pin);
 
-	PORTD &= ~(1 << 7);
+	DHT22Port &= ~(1 << DHT22Pin);
 	_delay_ms(1.5);
-	PORTD |= (1 << 7);
+	DHT22Port |= (1 << DHT22Pin);
 	//Delays program progression for 30us to allow for DHT22 response as per DHT22 data sheet requirements
 	//Transitions PD7 to input mode for response from DHT22 
 	_delay_us(30);
-	DDRD &= ~(1 << 7);
+	DHT22Port &= ~(1 << DHT22Pin);
 	
 	//Delays for 80us prior to allow DHT22 time to response 
 	_delay_us(80);
 	//Checks if the DHT22 responses as expected as per data sheet (Should pull the voltage back low)
-	if (!(PIND & (1 << 7)))
+	if (!(DHT22In & (1 << DHT22Pin)))
 	{
-		return true;
 		//lights up LED at PB0 to indicate successful initialization
-		PORTB |= (1<<0);
+		StatusLEDPort |= (1<< StatusLEDPin);
+		return true;
 	}
 	else{
 		return false;
@@ -87,15 +126,15 @@ for (uint8_t i = 0; i< 5; i++){
 		for (uint8_t j = 0; j<40;j++)
 		{
 			 // Wait for LOW
-			 while (PIND & (1 << 7));
+			 while (DHT22In & (1 << DHT22Pin));
 			 // Wait for HIGH
-			 while (!(PIND & (1 << 7)));
+			 while (!(DHT22In & (1 << DHT22Pin)));
 			 /* Sample after 50us if the value is already high (0 bits stays high for 26us after initial 40us
 			    verse 1 bits which stays high for 70us, the bit is a 1, else it is a zero. 
 			    Since the buffer is already cleared to zero at start, no action is needed */
 			 
 			 _delay_us(50);	
-			 if (PIND & (1 << 7))
+			 if (DHT22In & (1 << DHT22Pin))
 			 {
 				DHT22Data[byteCounter] |= (1 << bitCounter);
 			 } 
@@ -108,7 +147,7 @@ for (uint8_t i = 0; i< 5; i++){
 			 bitCounter--;
 			 }
 			 // Wait for HIGH to finish to ensure no issues for next loop
-			 while (PIND & (1 << 7));
+			 while (DHT22In & (1 << DHT22Pin));
 	}
 	//Verify the (data % 256) is == to the checksum to ensure proper transmission
 	if ( ((DHT22Data[0]+DHT22Data[1]+DHT22Data[2]+DHT22Data[3]) % 256) == DHT22Data[4])
@@ -117,3 +156,26 @@ for (uint8_t i = 0; i< 5; i++){
 	}
 	else return false;
 	}
+
+void LCDInitialize (void){
+//Initializes the LCD for outputing data
+
+	//pause required from power start to LCD and first command,
+	//ensures no issues
+	_delay_ms(45);
+	
+	
+	
+	
+}
+
+void LCDControl (uint8_t command){
+// Allows for the sending of commands to the LCD to enter different modes
+	
+}
+
+void LCDWrite (uint8_t output){
+//Outputs the passed argument to the LCD 
+
+}
+
