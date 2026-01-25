@@ -1,49 +1,82 @@
 /*
  * DHT22.c
  *
- * Created: 1/20/2026 11:55:40 AM
+ * Created: 1/24/2026 11:55:40 AM
  * Author : Alex Mertz
  * This program operates the DHT22 temperature and humidity sensor using an AVR Atmega328P MCU 
+ * This program also creates the functions for interacting with a 2-line 16-character LCD 
  */ 
 
+#define F_CPU 16000000UL
 #include <avr/io.h>
 #include <util/delay.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 
 //Pin Mapping 
 /*
 Port B:
-PB0:
-PB1:
-PB2:
-PB3:
-PB7:
+PB0: Status LED
+PB1: DB3 (LCD Display)
+PB2: DB4 (LCD Display)
+PB3: DB5 (LCD Display)
+PB4: DB6 (LCD Display)
+PB5: DB7 (LCD Display) 
+PB6: XTAL1 (16 MHz Clock)
+PB7: XTAL2 (16 MHz Clock)
+
+Port C:
+PC2:
+PC3: 
+PC5: SCLK for I2C
+PC4: SDA for I2C
+PC5: Need to change PB3 to here
+PC6: Reset pin for Flashing
 
 PORT D:
-PD0: Status LED
-PD1: 
-PD2:
-PD3:
-PD4:
-PD5:
-PD6:
+PD0: RS (LCD Display)
+PD1: R/W (LCD Display) May exclude
+PD2: E Chip Enable (LCD Display)
+PD3: DB0 (LCD Display)
+PD4: DB1 (LCD Display)
+PD5: DB2 (LCD Display)
+PD6: VO Contrast Adjust (LCD Display)
 PD7: DHT22 IC
 */
+
 
 //DHT22 port/pin definitions (PORT D, Pin 7) 
 #define DHT22DDR DDRD
 #define DHT22In PIND
 #define DHT22Port PORTD
-#define DHT22Pin 7
+#define DHT22Pin PD7
 
 //LCD port/pins definitions
+#define LCD_DDR1 DDRD
+#define LCD_Port1 PORTD
+#define LCD_Pin1 PIND
+#define LCD_DDR2 DDRB
+#define LCD_Port2 PORTB
+#define LCD_PIN2 PINB
+#define LCD_E PD2
+#define LCD_VO PD6
+#define LCD_RW PD1
+#define LCD_RS PD0
+#define LCD_DB0 PD3
+#define LCD_DB1 PD4
+#define LCD_DB2 PD5
+#define LCD_DB3 PB1
+#define LCD_DB4 PB2
+#define LCD_DB5 PB3
+#define LCD_DB6 PB4
+#define LCD_DB7 PB5
 
 //MISC port/Pins definitions (PORT B, Pin 0)
 #define StatusLEDDDR DDRB
 #define StatusLEDIn PINB
 #define StatusLEDPort PORTB
-#define StatusLEDPin 0
+#define StatusLEDPin PB0
 
 //DHT22 Functions
 bool DHT22Initialize (void);
@@ -53,8 +86,9 @@ void verifyDHT22 (uint8_t *data);
 
 //LCD Functions
 void LCDInitialize (void);
-void LCDControl (uint8_t command);
-void LCDWrite (uint8_t output); 
+void LCDInstruction (uint8_t instruction, char RS);
+void LCDWrite (uint8_t *output); 
+
 int main(void)
 {
 bool readSuccess;	
@@ -74,7 +108,8 @@ _delay_us(80);
 		readSuccess = readDHT22(DHT22Data);
 		}while (!readSuccess);
 			;
-		displayDHT22(DHT22Data);
+		LCDWrite(DHT22Data);
+		_delay_ms(2000);
     }
 }
 
@@ -90,7 +125,7 @@ DHT22DDR |= (1 << DHT22Pin);
 	//Delays program progression for 30us to allow for DHT22 response as per DHT22 data sheet requirements
 	//Transitions PD7 to input mode for response from DHT22 
 	_delay_us(30);
-	DHT22Port &= ~(1 << DHT22Pin);
+	DHT22DDR &= ~(1 << DHT22Pin);
 	
 	//Delays for 80us prior to allow DHT22 time to response 
 	_delay_us(80);
@@ -158,24 +193,102 @@ for (uint8_t i = 0; i< 5; i++){
 	}
 
 void LCDInitialize (void){
-//Initializes the LCD for outputing data
+//Initializes the LCD for outputting data
+// Step 1: Sets the instruction register to 8 bit mode, 2 lines
+// 5x8 font 
+// Step 2: Turns the display off for initialization
+// Step 3: Clears DDRAM of the display
+// Step 4: Sets cursor to move to rightwards and turns off display shift
+// Step 5: Turns the display on
+//Places all LCD pins into output mode
+
+//PORTD
+LCD_DDR1 |= 0b01111111;
+
+//PORTB
+LCD_DDR2 |= 0b00111110;
 
 	//pause required from power start to LCD and first command,
 	//ensures no issues
 	_delay_ms(45);
 	
-	
-	
-	
+	// Step 1: Sets the instruction register to 8 bit mode, 2 lines
+	// 5x8 font
+	// RW and RS are pulled low to allow for IR setting
+	// E, chip select must be pulsed low to allow for command latching 
+	//DB5, DB4 and DB3 high and DB6 and DB7 low
+	LCDInstruction(0x38,0);
+	//Step 2: Turn the display off
+	//DB3 high, DB2, DB1
+	LCDInstruction(0x08,0);
+	//Step 3: Clear DDRAM 
+	LCDInstruction(0x01,0);
+	//Step 4: Set cursor, turn off shift
+	LCDInstruction(0x06,0);
+	//Step 5: Turn Display back on
+	LCDInstruction(0x0C,0);
 }
 
-void LCDControl (uint8_t command){
-// Allows for the sending of commands to the LCD to enter different modes
-	
+void LCDWrite (uint8_t *output){
+//Outputs the passed argument to the LCD
+//Expects data from DHT22 which is a 18 char array 
+char outputStr[17];
+
+//Outputs humidity as 0.1% RH
+uint16_t humidity = ((output[0] << 8 | output[1]))/10; 
+//Outputs temperature as 0.1% C
+uint16_t temperature = ((output[2]<< 8 | output [3]))/10;
+
+//Convert the output uint16_ts into strings using sprintf
+sprintf(outputStr,"Humidity:%2d%%", humidity);
+//moves cursor to first line
+LCDInstruction(0x80,0);
+
+for (uint8_t i = 0; i<16 && outputStr[i]; i++){
+	LCDInstruction(outputStr[i],1);
 }
 
-void LCDWrite (uint8_t output){
-//Outputs the passed argument to the LCD 
+sprintf(outputStr,"Temperature:%2dC",temperature);
+LCDInstruction(0xC0,0); //moves cursor to second line
 
+for (uint8_t i = 0; i<16 && outputStr[i];i++){
+	LCDInstruction(outputStr[i],1);
+}
 }
 
+void LCDInstruction (uint8_t instruction,char RS){
+//converts a hex instruction code into binary for the IR
+//Also can be used for writing characters to the LCD by changing RS to 1 
+//DB7(MSB) -> DB0 (LSB)
+
+if (RS == 1) LCD_Port1 |= (1 << LCD_RS);
+else LCD_Port1 &= ~(1 << LCD_RS);
+
+LCD_Port1 &= ~(1 << LCD_RW);
+
+//PORTD PORT1
+//Clears pins first
+LCD_Port1 &= ~(1 << LCD_DB0 | 1 << LCD_DB1 | 1 << LCD_DB2);
+LCD_Port1 |= (instruction & 0x07);
+
+//PORTB Port2
+//Clears pins first
+LCD_Port2 &= ~(1 << LCD_DB3 | 1 << LCD_DB4 | 1 << LCD_DB5 | 1 << LCD_DB6 | 1 << LCD_DB7);
+LCD_Port2 |= ((instruction & 0x38)>> 3) << 1;
+
+if (instruction & (1 << 6)) LCD_Port2 |= (1 << LCD_DB6); 
+if (instruction & (1 << 7)) LCD_Port2 |= (1 << LCD_DB7);
+
+
+//Pulses E and clears IR of prior command
+	//E pulse
+	LCD_Port1 |= (1 << LCD_E);
+	_delay_us(1);
+	LCD_Port1 &= ~(1 << LCD_E);
+	//to account for propagation delay
+	_delay_us(40);
+
+	//Clears data from IR 
+	LCD_Port1 &= ~(1 << LCD_DB0 | 1 << LCD_DB1 | 1<< LCD_DB2);
+	LCD_Port2 &= ~(1 << LCD_DB3 | 1 << LCD_DB4 | 1<< LCD_DB5 | 1<< LCD_DB6 | 1<< LCD_DB7); 
+}
